@@ -1,4 +1,4 @@
-      <#
+<#
 .SYNOPSIS
 Bypasses Windows 11 installation and update restrictions and optionally performs a Windows Update reset.
 
@@ -27,18 +27,18 @@ OR run it directly from the web:
 - Run the script as an administrator!
 #>
 
-
 param(
     [switch]$r
 )
 
-# Check if the script is running as an administrator
+# Check for administrative privileges
 if (-not ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole] "Administrator")) {
     Write-Host "The script is not running as an administrator. Attempting to elevate privileges..." -ForegroundColor Yellow
     Start-Process powershell -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`"" -Verb RunAs
     exit
 }
 
+# --- Windows Update Reset (if -r switch is provided) ---
 if ($r) {
     Write-Host "`n*** Executing Windows Update reset and network settings reset... ***" -ForegroundColor Cyan
     Write-Host "1. Stopping Windows Update services..."
@@ -117,6 +117,7 @@ if ($r) {
     Read-Host "Press Enter to continue"
 }
 
+# --- Configure Windows Update Target Release Version ---
 Write-Host "`n*** Configure Windows Update Target Release Version ***" -ForegroundColor Cyan
 Write-Host "1 (or press Enter) - Set default target release version to 24H2"
 Write-Host "2 - Set a custom target release version"
@@ -162,7 +163,7 @@ else {
     exit
 }
 
-
+# --- Bypassing Windows 11 Installation and Update Restrictions ---
 Write-Host "`n*** Bypassing Windows 11 installation and update restrictions ***" -ForegroundColor Cyan
 Write-Host "*** Modifying the registry, make sure you know what you are doing! ***`n" -ForegroundColor Yellow
 
@@ -249,3 +250,81 @@ foreach ($task in $telemetryTasks) {
 Write-Host "*** Windows Update is now targeting the Windows 11 $targetRelease update! ***" -ForegroundColor Green
 Write-Host "`n*** Done! ***" -ForegroundColor Green
 Write-Host "*** Please restart your computer for the changes to take effect. ***" -ForegroundColor Yellow
+
+# --- Installation Option Menu Section ---
+Write-Host ""
+Write-Host "-------------------------------------"
+Write-Host "Installation Options:"
+Write-Host "1 - Exit the script"
+Write-Host "2 - Download the latest ISO and start update using /setup server (via Fido)"
+Write-Host "3 - Run Windows Update via PowerShell (using PSWindowsUpdate)"
+$installChoice = Read-Host "Select an option (1-3):"
+
+switch ($installChoice) {
+    "1" {
+        Write-Host "Exiting the script." -ForegroundColor Yellow
+        exit
+    }
+    "2" {
+        Write-Host "Downloading the latest ISO using Fido..." -ForegroundColor Cyan
+        
+        # Detect current system language for ISO download
+        $currentLang = (Get-Culture).Name
+        
+        # Download Fido script if not already present
+        $fidoPath = Join-Path $env:TEMP "Fido.ps1"
+        if (-not (Test-Path $fidoPath)) {
+            Write-Host "Downloading Fido script from GitHub..."
+            Invoke-WebRequest "https://raw.githubusercontent.com/pbatard/Fido/master/Fido.ps1" -OutFile $fidoPath
+        }
+        # Use Fido to retrieve the ISO download link. Adjust parameters as needed.
+        Write-Host "Retrieving ISO download link via Fido..."
+        $isoUrl = powershell -ExecutionPolicy Bypass -File $fidoPath -Win "Windows 11" -Rel "Latest" -Ed "Windows 11 Home/Pro/Edu" -Lang $currentLang -Arch "x64" -GetUrl
+        if (-not $isoUrl) {
+            Write-Host "Failed to retrieve ISO download link from Fido." -ForegroundColor Red
+            exit
+        }
+        Write-Host "ISO download link obtained: $isoUrl" -ForegroundColor Green
+        $isoPath = "C:\Windows11.iso"
+        Write-Host "Downloading ISO to $isoPath ..." -ForegroundColor Cyan
+        Invoke-WebRequest -Uri $isoUrl -OutFile $isoPath
+        if (-not (Test-Path $isoPath -PathType Leaf)) {
+            Write-Host "ISO download failed." -ForegroundColor Red
+            exit
+        }
+        Write-Host "ISO downloaded successfully: $isoPath" -ForegroundColor Green
+        Write-Host "Mounting ISO..." -ForegroundColor Cyan
+        $mountOutput = Mount-DiskImage -ImagePath $isoPath -PassThru
+        Start-Sleep -Seconds 5  # Allow time for mounting
+        $volume = Get-Volume -DiskImage $mountOutput
+        if ($volume) {
+            $driveLetter = $volume.DriveLetter
+            Write-Host ("ISO mounted to drive {0}:" -f $driveLetter) -ForegroundColor Green
+            Write-Host "Starting setup.exe with /setup server parameter..." -ForegroundColor Cyan
+            Start-Process -FilePath "$($driveLetter):\setup.exe" -ArgumentList "/setup server" -Wait
+        }
+        else {
+            Write-Host "Failed to determine drive letter from mounted ISO." -ForegroundColor Red
+        }
+    }
+"3" {
+    Write-Host "Running Windows Update via PowerShell..." -ForegroundColor Cyan
+    # Ensure PSWindowsUpdate module is installed and imported
+    if (-not (Get-Module -ListAvailable -Name PSWindowsUpdate)) {
+        Install-Module -Name PSWindowsUpdate -Force -Scope CurrentUser
+    }
+    Import-Module PSWindowsUpdate
+    Write-Host "Searching for and installing available Windows updates..." -ForegroundColor Cyan
+    try {
+        Install-WindowsUpdate -AcceptAll -AutoReboot -Verbose
+    }
+    catch {
+        Write-Host "Error occurred during targeted update installation. Attempting to install all available updates..." -ForegroundColor Yellow
+        Get-WindowsUpdate -MicrosoftUpdate -Verbose | Install-WindowsUpdate -AcceptAll -AutoReboot -Verbose
+    }
+}
+default {
+    Write-Host "Invalid selection. Exiting the script." -ForegroundColor Red
+    exit
+}
+}

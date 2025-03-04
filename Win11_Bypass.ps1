@@ -311,7 +311,7 @@ switch ($installChoice) {
         $driveLetter = $volume.DriveLetter
         Write-Host ("ISO mounted to drive {0}:" -f $driveLetter) -ForegroundColor Green
 
-        # --- DLL modifiointi: ohitetaan toinen TPM-tarkistus ---
+        # --- DLL modification: Bypass second TPM check ---
         $dllPath = "$($driveLetter):\hwreqchk.dll"
         if (Test-Path $dllPath) {
             Write-Host "Modifying $dllPath to skip second TPM check..." -ForegroundColor Cyan
@@ -323,7 +323,7 @@ switch ($installChoice) {
             $replaceBytes = $utf8.GetBytes($replace)
             $index = -1
 
-            # Etsi etsitty merkkijono
+            # Find string
             for ($i = 0; $i -le $content.Length - $searchBytes.Length; $i++) {
                 $found = $true
                 for ($j = 0; $j -lt $searchBytes.Length; $j++) {

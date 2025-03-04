@@ -186,6 +186,13 @@ $hwReqChkPath = "$appCompatFlagsPath\HwReqChk"
     New-ItemProperty -Path $_.Path -Name $_.Name -Value $_.Value -PropertyType DWord -Force
 }
 
+Write-Host "`n*** Disabling Windows Update safeguards... ***" -ForegroundColor Cyan
+$wuUpdatePath = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate"
+if (-not (Test-Path $wuUpdatePath)) {
+    New-Item -Path $wuUpdatePath -Force | Out-Null
+}
+New-ItemProperty -Path $wuUpdatePath -Name "DisableWUfBSafeguards" -Value 1 -PropertyType DWord -Force | Out-Null
+
 # Clear previous Windows Update compatibility checks
 Write-Host "`n*** Removing previous Windows Update compatibility checks... ***" -ForegroundColor Cyan
 @(
@@ -265,48 +272,94 @@ switch ($installChoice) {
         Write-Host "Exiting the script." -ForegroundColor Yellow
         exit
     }
-    "2" {
-        Write-Host "Downloading the latest ISO using Fido..." -ForegroundColor Cyan
-        
-        # Detect current system language for ISO download
-        $currentLang = (Get-Culture).Name
-        
-        # Download Fido script if not already present
-        $fidoPath = Join-Path $env:TEMP "Fido.ps1"
-        if (-not (Test-Path $fidoPath)) {
-            Write-Host "Downloading Fido script from GitHub..."
-            Invoke-WebRequest "https://raw.githubusercontent.com/pbatard/Fido/master/Fido.ps1" -OutFile $fidoPath
-        }
-        # Use Fido to retrieve the ISO download link. Adjust parameters as needed.
-        Write-Host "Retrieving ISO download link via Fido..."
-        $isoUrl = powershell -ExecutionPolicy Bypass -File $fidoPath -Win "Windows 11" -Rel "Latest" -Ed "Windows 11 Home/Pro/Edu" -Lang $currentLang -Arch "x64" -GetUrl
-        if (-not $isoUrl) {
-            Write-Host "Failed to retrieve ISO download link from Fido." -ForegroundColor Red
-            exit
-        }
-        Write-Host "ISO download link obtained: $isoUrl" -ForegroundColor Green
-        $isoPath = "C:\Windows11.iso"
-        Write-Host "Downloading ISO to $isoPath ..." -ForegroundColor Cyan
-        Invoke-WebRequest -Uri $isoUrl -OutFile $isoPath
-        if (-not (Test-Path $isoPath -PathType Leaf)) {
-            Write-Host "ISO download failed." -ForegroundColor Red
-            exit
-        }
-        Write-Host "ISO downloaded successfully: $isoPath" -ForegroundColor Green
-        Write-Host "Mounting ISO..." -ForegroundColor Cyan
-        $mountOutput = Mount-DiskImage -ImagePath $isoPath -PassThru
-        Start-Sleep -Seconds 5  # Allow time for mounting
-        $volume = Get-Volume -DiskImage $mountOutput
-        if ($volume) {
-            $driveLetter = $volume.DriveLetter
-            Write-Host ("ISO mounted to drive {0}:" -f $driveLetter) -ForegroundColor Green
-            Write-Host "Starting setup.exe with /setup server parameter..." -ForegroundColor Cyan
-            Start-Process -FilePath "$($driveLetter):\setup.exe" -ArgumentList "/setup server /auto upgrade" -Wait
+"2" {
+    Write-Host "Downloading the latest ISO using Fido..." -ForegroundColor Cyan
+    
+    # Detect current system language for ISO download
+    $currentLang = (Get-Culture).Name
+    
+    # Download Fido script if not already present
+    $fidoPath = Join-Path $env:TEMP "Fido.ps1"
+    if (-not (Test-Path $fidoPath)) {
+        Write-Host "Downloading Fido script from GitHub..."
+        Invoke-WebRequest "https://raw.githubusercontent.com/pbatard/Fido/master/Fido.ps1" -OutFile $fidoPath
+    }
+    
+    # Use Fido to retrieve the ISO download link. Adjust parameters as needed.
+    Write-Host "Retrieving ISO download link via Fido..."
+    $isoUrl = & powershell -ExecutionPolicy Bypass -File $fidoPath -Win "Windows 11" -Rel "Latest" -Ed "Windows 11 Home/Pro/Edu" -Lang $currentLang -Arch "x64" -GetUrl
+    if (-not $isoUrl) {
+        Write-Host "Failed to retrieve ISO download link from Fido." -ForegroundColor Red
+        exit
+    }
+    Write-Host "ISO download link obtained: $isoUrl" -ForegroundColor Green
+    
+    $isoPath = "C:\Windows11.iso"
+    Write-Host "Downloading ISO to $isoPath ..." -ForegroundColor Cyan
+    Invoke-WebRequest -Uri $isoUrl -OutFile $isoPath
+    if (-not (Test-Path $isoPath -PathType Leaf)) {
+        Write-Host "ISO download failed." -ForegroundColor Red
+        exit
+    }
+    Write-Host "ISO downloaded successfully: $isoPath" -ForegroundColor Green
+    
+    Write-Host "Mounting ISO..." -ForegroundColor Cyan
+    $mountOutput = Mount-DiskImage -ImagePath $isoPath -PassThru
+    Start-Sleep -Seconds 5  # Allow time for mounting
+    $volume = Get-Volume -DiskImage $mountOutput
+    if ($volume) {
+        $driveLetter = $volume.DriveLetter
+        Write-Host ("ISO mounted to drive {0}:" -f $driveLetter) -ForegroundColor Green
+
+        # --- DLL modifiointi: ohitetaan toinen TPM-tarkistus ---
+        $dllPath = "$($driveLetter):\hwreqchk.dll"
+        if (Test-Path $dllPath) {
+            Write-Host "Modifying $dllPath to skip second TPM check..." -ForegroundColor Cyan
+            $content = [IO.File]::ReadAllBytes($dllPath)
+            $utf8 = [Text.Encoding]::UTF8
+            $search = 'SQ_TpmVersion GTE 1'
+            $replace = 'SQ_TpmVersion GTE 0'
+            $searchBytes = $utf8.GetBytes($search)
+            $replaceBytes = $utf8.GetBytes($replace)
+            $index = -1
+
+            # Etsi etsitty merkkijono
+            for ($i = 0; $i -le $content.Length - $searchBytes.Length; $i++) {
+                $found = $true
+                for ($j = 0; $j -lt $searchBytes.Length; $j++) {
+                    if ($content[$i + $j] -ne $searchBytes[$j]) {
+                        $found = $false
+                        break
+                    }
+                }
+                if ($found) {
+                    $index = $i
+                    break
+                }
+            }
+            
+            if ($index -ge 0) {
+                for ($k = 0; $k -lt $replaceBytes.Length; $k++) {
+                    $content[$index + $k] = $replaceBytes[$k]
+                }
+                [IO.File]::WriteAllBytes($dllPath, $content)
+                Write-Host "DLL modified successfully." -ForegroundColor Green
+            }
+            else {
+                Write-Host "Search pattern not found in DLL." -ForegroundColor Yellow
+            }
         }
         else {
-            Write-Host "Failed to determine drive letter from mounted ISO." -ForegroundColor Red
+            Write-Host "DLL file not found at $dllPath" -ForegroundColor Red
         }
+
+        Write-Host "Starting setup.exe with /setup server parameter..." -ForegroundColor Cyan
+        Start-Process -FilePath "$($driveLetter):\setup.exe" -ArgumentList "/setup server /auto upgrade" -Wait
     }
+    else {
+        Write-Host "Failed to determine drive letter from mounted ISO." -ForegroundColor Red
+    }
+}
 "3" {
     Write-Host "Running Windows Update via PowerShell..." -ForegroundColor Cyan
     # Ensure PSWindowsUpdate module is installed and imported

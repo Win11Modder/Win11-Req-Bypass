@@ -256,7 +256,7 @@ Write-Host ""
 Write-Host "-------------------------------------"
 Write-Host "Installation Options:"
 Write-Host "1 - Exit the script"
-Write-Host "2 - Download the latest ISO and start update using /setup server (via Fido)"
+Write-Host "2 - Download the latest ISO and start update using /setup server"
 Write-Host "3 - Run Windows Update via PowerShell (using PSWindowsUpdate)"
 $installChoice = Read-Host "Select an option (1-3):"
 

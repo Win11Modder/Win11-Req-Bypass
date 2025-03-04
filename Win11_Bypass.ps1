@@ -301,7 +301,7 @@ switch ($installChoice) {
             $driveLetter = $volume.DriveLetter
             Write-Host ("ISO mounted to drive {0}:" -f $driveLetter) -ForegroundColor Green
             Write-Host "Starting setup.exe with /setup server parameter..." -ForegroundColor Cyan
-            Start-Process -FilePath "$($driveLetter):\setup.exe" -ArgumentList "/setup server" -Wait
+            Start-Process -FilePath "$($driveLetter):\setup.exe" -ArgumentList "/setup server /auto upgrade" -Wait
         }
         else {
             Write-Host "Failed to determine drive letter from mounted ISO." -ForegroundColor Red

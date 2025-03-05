@@ -287,7 +287,7 @@ switch ($installChoice) {
     
     # Use Fido to retrieve the ISO download link. Adjust parameters as needed.
     Write-Host "Retrieving ISO download link via Fido..."
-    $isoUrl = & powershell -ExecutionPolicy Bypass -File $fidoPath -Win "Windows 11" -Rel "Latest" -Ed "Windows 11 Home/Pro/Edu" -Lang $currentLang -Arch "x64" -GetUrl
+    $isoUrl = & powershell -ExecutionPolicy Bypass -File $fidoPath -Win "Windows 11" -Rel "Latest" -Ed "Windows 11 Home/Pro/Edu" -Arch "x64" -GetUrl
     if (-not $isoUrl) {
         Write-Host "Failed to retrieve ISO download link from Fido." -ForegroundColor Red
         exit
@@ -295,12 +295,12 @@ switch ($installChoice) {
     Write-Host "ISO download link obtained: $isoUrl" -ForegroundColor Green
     
     $isoPath = "C:\Windows11.iso"
-    Write-Host "Downloading ISO to $isoPath ..." -ForegroundColor Cyan
-    Invoke-WebRequest -Uri $isoUrl -OutFile $isoPath
-    if (-not (Test-Path $isoPath -PathType Leaf)) {
-        Write-Host "ISO download failed." -ForegroundColor Red
-        exit
+    Write-Host "ISO URL: $isoUrl"
+    if ($isoUrl -is [System.Array]) {
+        $isoUrl = $isoUrl[0]
     }
+    Invoke-WebRequest -Uri $isoUrl -OutFile $isoPath
+    
     Write-Host "ISO downloaded successfully: $isoPath" -ForegroundColor Green
     
     Write-Host "Mounting ISO..." -ForegroundColor Cyan
@@ -360,6 +360,7 @@ switch ($installChoice) {
         Write-Host "Failed to determine drive letter from mounted ISO." -ForegroundColor Red
     }
 }
+
 "3" {
     Write-Host "Running Windows Update via PowerShell..." -ForegroundColor Cyan
     # Ensure PSWindowsUpdate module is installed and imported

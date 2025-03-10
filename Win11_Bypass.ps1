@@ -283,7 +283,7 @@ function Invoke-ISOUpgrade {
 # ---------------------------------------------------------
 # This PowerShell script directly patches hwreqchk.dll to
 # force all hardware requirement checks to always return "true".
------------------------------------------------------------
+#-----------------------------------------------------------
 $driveLetter = (Get-PSDrive -PSProvider FileSystem | Where-Object { $_.Root -match ":\\" }).Name
 $dllPath = "$($driveLetter):\sources\hwreqchk.dll"
 $backupPath = "$dllPath.bak"

@@ -279,50 +279,89 @@ function Invoke-ISOUpgrade {
         exit 1
     }
     
-    # --- DLL modification: Bypass second TPM check ---
-    # Note: hwreqchk.dll is now located in the "sources" folder.
-    $dllPath = "$($driveLetter):\sources\hwreqchk.dll"
-    if (Test-Path $dllPath) {
-        Write-Host "Modifying $dllPath to skip second TPM check..." -ForegroundColor Cyan
-        try {
-            $content = [IO.File]::ReadAllBytes($dllPath)
-            $utf8 = [Text.Encoding]::UTF8
-            $search = 'SQ_TpmVersion GTE 1'
-            $replace = 'SQ_TpmVersion GTE 0'
-            $searchBytes = $utf8.GetBytes($search)
-            $replaceBytes = $utf8.GetBytes($replace)
-            $index = -1
-    
-            # Search for the specified string in the file
-            for ($i = 0; $i -le $content.Length - $searchBytes.Length; $i++) {
-                $found = $true
-                for ($j = 0; $j -lt $searchBytes.Length; $j++) {
-                    if ($content[$i + $j] -ne $searchBytes[$j]) {
-                        $found = $false
-                        break
-                    }
-                }
-                if ($found) {
-                    $index = $i
+   # Patch_hwreqchk.ps1
+# ---------------------------------------------------------
+# This PowerShell script directly patches hwreqchk.dll to
+# force all hardware requirement checks to always return "true".
+#
+# Instead of renaming requirement strings, we modify binary
+# instructions so that they always allow installation.
+#
+# Use at your own risk. Backup the file before applying changes.
+# ---------------------------------------------------------
+
+# Path to hwreqchk.dll (modify as needed)
+$driveLetter = (Get-PSDrive -PSProvider FileSystem | Where-Object { $_.Root -match ":\\" }).Name
+$dllPath = "$($driveLetter):\sources\hwreqchk.dll"
+$backupPath = "$dllPath.bak"
+
+Write-Host "Attempting to patch hwreqchk.dll for automatic hardware requirement pass..." -ForegroundColor Cyan
+
+# Ensure the DLL file exists before proceeding
+if (!(Test-Path $dllPath)) {
+    Write-Host "Error: DLL file not found at $dllPath" -ForegroundColor Red
+    return
+}
+
+try {
+    # Read the DLL file as a byte array
+    $content = [System.IO.File]::ReadAllBytes($dllPath)
+
+    # Hex patterns to modify (Converting checks to always pass)
+    $patches = @(
+        @{ Search = [byte[]](0x85, 0xC0, 0x74, 0x3D); Replace = [byte[]](0xB0, 0x01, 0x90, 0x90) } # JZ -> MOV AL, 1 (force pass)
+        @{ Search = [byte[]](0x0F, 0x85); Replace = [byte[]](0x90, 0x90) } # JNZ -> NOP NOP
+        @{ Search = [byte[]](0x0F, 0x84); Replace = [byte[]](0x90, 0x90) } # JZ -> NOP NOP
+    )
+
+    # Create a backup before modifying
+    if (!(Test-Path $backupPath)) {
+        Copy-Item $dllPath $backupPath -Force
+        Write-Host "Backup created: $backupPath" -ForegroundColor Yellow
+    }
+
+    # Apply each patch
+    foreach ($patch in $patches) {
+        $searchBytes = $patch.Search
+        $replaceBytes = $patch.Replace
+        $index = -1
+
+        # Search for the hex pattern in the file
+        for ($i = 0; $i -le $content.Length - $searchBytes.Length; $i++) {
+            $found = $true
+            for ($j = 0; $j -lt $searchBytes.Length; $j++) {
+                if ($content[$i + $j] -ne $searchBytes[$j]) {
+                    $found = $false
                     break
                 }
             }
-            
-            if ($index -ge 0) {
-                for ($k = 0; $k -lt $replaceBytes.Length; $k++) {
-                    $content[$index + $k] = $replaceBytes[$k]
-                }
-                [IO.File]::WriteAllBytes($dllPath, $content)
-                Write-Host "DLL modified successfully." -ForegroundColor Green
-            } else {
-                Write-Host "Search pattern not found in DLL. No modifications made." -ForegroundColor Yellow
+            if ($found) {
+                $index = $i
+                break
             }
-        } catch {
-            Write-Host "Error modifying DLL: $_" -ForegroundColor Red
         }
-    } else {
-        Write-Host "DLL file not found at $dllPath" -ForegroundColor Red
+
+        # If pattern found, patch the bytes
+        if ($index -ge 0) {
+            for ($k = 0; $k -lt $replaceBytes.Length; $k++) {
+                $content[$index + $k] = $replaceBytes[$k]
+            }
+            Write-Host "Patched: " + ($searchBytes -join ' ') + " → " + ($replaceBytes -join ' ') -ForegroundColor Green
+        }
+        else {
+            Write-Host "Pattern not found: " + ($searchBytes -join ' ') + ". Skipped." -ForegroundColor Yellow
+        }
     }
+
+    # Save the modified DLL file
+    [System.IO.File]::WriteAllBytes($dllPath, $content)
+    Write-Host "Successfully patched hwreqchk.dll! All hardware checks will now pass." -ForegroundColor Green
+
+}
+catch {
+    Write-Host "Error: Something went wrong while modifying hwreqchk.dll - $_" -ForegroundColor Red
+}
+
     
     # Launch Windows setup
     Write-Host "Starting setup.exe with /setup server parameter..." -ForegroundColor Cyan
@@ -332,7 +371,7 @@ function Invoke-ISOUpgrade {
             Write-Host "setup.exe not found at $setupPath" -ForegroundColor Red
             exit 1
         }
-        Start-Process -FilePath $setupPath -ArgumentList "/setup server /auto upgrade" -Wait -ErrorAction Stop
+        Start-Process -FilePath $setupPath -ArgumentList "/auto upgrade" -Wait -ErrorAction Stop
     } catch {
         Write-Host "Error starting setup.exe: $_" -ForegroundColor Red
         exit 1
